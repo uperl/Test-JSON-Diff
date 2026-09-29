@@ -163,6 +163,26 @@ subtest 'usage errors' => sub {
         qr/max_lines must be a positive integer/, 'bad max_lines';
 };
 
+subtest 'insulated from caller $/' => sub {
+    # a caller that has left $/ in slurp mode (or any non-default value)
+    # shouldn't affect _diff's own line-based reading of the diff subprocess's
+    # output -- in particular, with $/ undef, reading an already-at-EOF pipe
+    # returns an empty string once instead of undef immediately, which used
+    # to be misread as a single (phantom) line of diff output, producing a
+    # false failure for two documents that are actually the same.
+    foreach my $sep ( undef, '', "\x00" ) {
+        local $/ = $sep;
+        my $sep_name = defined $sep ? ( length $sep ? "chr(" . ord($sep) . ")" : "''" ) : 'undef';
+
+        my ($ret) = run_check( '{"a":1,"b":2}', '{"b":2,"a":1}', "same despite \$/ = $sep_name" );
+        is $ret, T(), "still detects equal JSON when caller left \$/ = $sep_name";
+
+        my ( undef, undef, $diag ) = run_check( '[1,2]', '[2,1]', "different despite \$/ = $sep_name" );
+        like $diag, qr/^--- expected\n\+\+\+ actual\n\@\@/,
+          "still produces a real diagnostic for an actual difference when \$/ = $sep_name";
+    }
+};
+
 subtest 'missing tools' => sub {
     my $jq = File::Which::which('jq');
 

@@ -201,6 +201,13 @@ sub _run_to_files ($cmd, $in_path, $out_path, $err_path) {
 # returns an empty list if the files are the same, otherwise up to
 # $max_lines lines of unified diff, followed by '...' if clipped.
 sub _diff ($diff, $context, $max_lines, $expected, $actual, $err_path) {
+    # reading $diff's output is line based below, so make sure that's true
+    # regardless of what the caller has done to $/ -- in particular, if $/
+    # is set to undef (slurp mode), reading an already-at-EOF pipe returns
+    # an empty string once instead of undef immediately, which is read as a
+    # single (phantom) line of diff output, producing a false failure.
+    local $/ = "\n";
+
     my $err = $err_path->openw_raw;
     my $pid = open3(my $stdin, my $stdout, '>&' . fileno($err),
         $diff, "-U$context", '--label', 'expected', '--label', 'actual', $expected, $actual);
