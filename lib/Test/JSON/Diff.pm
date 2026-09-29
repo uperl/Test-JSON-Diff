@@ -4,7 +4,7 @@ use warnings;
 use v5.42;
 use Test2::API qw( context_do );
 use File::Which qw( which );
-use File::Temp ();
+use Path::Tiny qw( tempdir );
 use IPC::Open3 qw( open3 );
 use Carp qw( croak );
 use Exporter qw( import );
@@ -158,23 +158,23 @@ sub json_eq_or_diff ($actual, $expected, @rest) {
     my $jq   = which('jq')   // croak "json_eq_or_diff: unable to find jq";
     my $diff = which('diff') // croak "json_eq_or_diff: unable to find diff";
 
-    my $dir = File::Temp->newdir;
+    my $dir = tempdir;
 
     my @diag;
     my %canon;
     foreach my $which (qw( actual expected )) {
-        my $raw = "$dir/$which.json";
-        _spew($raw, $which eq 'actual' ? $actual : $expected);
-        $canon{$which} = "$dir/$which.canon.json";
-        my $err = "$dir/$which.err";
+        my $raw = $dir->child("$which.json");
+        $raw->spew_raw($which eq 'actual' ? $actual : $expected);
+        $canon{$which} = $dir->child("$which.canon.json");
+        my $err = $dir->child("$which.err");
         my $status = _run_to_files([$jq, '-S', '-s', $jq_filter], $raw, $canon{$which}, $err);
         if($status != 0) {
-            push @diag, "$which is not valid JSON:", _slurp_lines($err);
+            push @diag, "$which is not valid JSON:", $err->lines_raw({ chomp => 1 });
         }
     }
 
     unless(@diag) {
-        @diag = _diff($diff, $options{context}, $options{max_lines}, $canon{expected}, $canon{actual}, "$dir/diff.err");
+        @diag = _diff($diff, $options{context}, $options{max_lines}, $canon{expected}, $canon{actual}, $dir->child('diff.err'));
     }
 
     my $ok = !@diag;
@@ -187,27 +187,12 @@ sub json_eq_or_diff ($actual, $expected, @rest) {
     return $ok;
 }
 
-sub _spew ($path, $content) {
-    open my $fh, '>:raw', $path or die "unable to write $path: $!";
-    print $fh $content;
-    close $fh or die "unable to write $path: $!";
-    return;
-}
-
-sub _slurp_lines ($path) {
-    open my $fh, '<', $path or die "unable to read $path: $!";
-    my @lines = <$fh>;
-    close $fh;
-    chomp @lines;
-    return @lines;
-}
-
 # run $cmd with stdin, stdout and stderr connected directly to files,
 # so that the (possibly large) data never passes through Perl.
 sub _run_to_files ($cmd, $in_path, $out_path, $err_path) {
-    open my $in,  '<:raw', $in_path  or die "unable to read $in_path: $!";
-    open my $out, '>:raw', $out_path or die "unable to write $out_path: $!";
-    open my $err, '>:raw', $err_path or die "unable to write $err_path: $!";
+    my $in  = $in_path->openr_raw;
+    my $out = $out_path->openw_raw;
+    my $err = $err_path->openw_raw;
     my $pid = open3('<&' . fileno($in), '>&' . fileno($out), '>&' . fileno($err), @$cmd);
     waitpid $pid, 0;
     return $?;
@@ -216,7 +201,7 @@ sub _run_to_files ($cmd, $in_path, $out_path, $err_path) {
 # returns an empty list if the files are the same, otherwise up to
 # $max_lines lines of unified diff, followed by '...' if clipped.
 sub _diff ($diff, $context, $max_lines, $expected, $actual, $err_path) {
-    open my $err, '>:raw', $err_path or die "unable to write $err_path: $!";
+    my $err = $err_path->openw_raw;
     my $pid = open3(my $stdin, my $stdout, '>&' . fileno($err),
         $diff, "-U$context", '--label', 'expected', '--label', 'actual', $expected, $actual);
     close $stdin;
@@ -241,7 +226,7 @@ sub _diff ($diff, $context, $max_lines, $expected, $actual, $err_path) {
 
     unless($clipped) {
         my $status = $? >> 8;
-        die join "\n", "diff failed with exit $status:", _slurp_lines($err_path)
+        die join "\n", "diff failed with exit $status:", $err_path->lines_raw({ chomp => 1 })
             if $? == -1 || $? & 127 || $status > 1;
     }
 

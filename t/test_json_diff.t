@@ -2,7 +2,7 @@ use Test2::V0 -no_srand => 1;
 use v5.42;
 use Test::JSON::Diff qw( json_eq_or_diff );
 use File::Which ();
-use File::Temp ();
+use Path::Tiny qw( tempdir );
 
 sub run_check (@args) {
     my $ret;
@@ -171,8 +171,8 @@ subtest 'missing tools' => sub {
         like dies { json_eq_or_diff('1', '1') }, qr/^json_eq_or_diff: unable to find jq at /, 'no jq';
     }
 
-    my $dir = File::Temp->newdir;
-    symlink $jq, "$dir/jq" or die "unable to symlink $jq: $!";
+    my $dir = tempdir;
+    symlink $jq, $dir->child("jq") or die "unable to symlink $jq: $!";
     {
         local $ENV{PATH} = "$dir";
         like dies { json_eq_or_diff('1', '1') }, qr/^json_eq_or_diff: unable to find diff at /, 'no diff';
