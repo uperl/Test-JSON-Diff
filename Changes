@@ -1,6 +1,8 @@
 Revision history for {{$dist->name}}
 
 {{$NEXT}}
+
+0.02      2026-09-29 15:41:00 -0600
   - fix _diff to no longer be affected by a caller's ambient $/ (input
     record separator); a caller that left $/ set to undef (or any other
     non-default value) could previously cause a false failure report for
